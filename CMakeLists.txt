@@ -3,7 +3,10 @@ project(RaftKVstore)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(RaftKVstore main.cpp)
+add_executable(RaftKVstore main.cpp
+        kvstore/KVStore.cpp
+        kvstore/KVStore.h
+)
 
 find_package(Boost REQUIRED COMPONENTS system filesystem)
 target_link_libraries(RaftKVstore PRIVATE Boost::boost Boost::system Boost::filesystem)
