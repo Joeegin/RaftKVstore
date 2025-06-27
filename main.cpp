@@ -69,7 +69,7 @@ int main(int argc, char* argv[]) {
     }
 
     int nodeId = std::stoi(argv[1]);
-    int basePort = 5000;
+    int basePort = 50000;
 
     // 3个节点：0->5000, 1->5001, 2->5002
     std::vector<std::pair<int, int>> peers = {
