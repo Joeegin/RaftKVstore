@@ -77,13 +77,16 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
             _node->receiveVoteRequest(req.term,req.candidateId);
             VoteResponse resp{req.term,true};
             json respMsg={
-                {"type","RequestVoteResponse"},
+                {"type","VoteResponse"},
                     {"data",resp}
             };
              std::string response=respMsg.dump()+"\n";//序列化响应并且在结尾加上换行
             boost::asio::async_write(*socket,boost::asio::buffer(response),[](auto,auto) {
 
             });
+        }else if (message["type"] == "VoteResponse") {
+            VoteResponse resp = message["data"].get<VoteResponse>();
+            _node->receiveVoteResponse(resp.term, resp.voteGranted);
         }
     }catch (std::exception &e) {
         std::cerr << "[Node " << _id << "] Error parsing message: " << e.what() << std::endl;
@@ -92,25 +95,49 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
 
 void RaftServer::sendVoteRequest(int peerId) {
     auto it = _peerPorts.find(peerId);
-    if (it ==_peerPorts.end()){return;}
+    if (it == _peerPorts.end()) return;
 
-    auto peerport=it->second;
+    auto peerport = it->second;
     auto socket = std::make_shared<tcp::socket>(_io_context);
-    auto endpoint=tcp::endpoint(tcp::v4(),peerport);
+    auto endpoint = tcp::endpoint(tcp::v4(), peerport);
 
-    socket->async_connect(endpoint,[this,socket,peerId](boost::system::error_code ec) {
+    socket->async_connect(endpoint, [this, socket, peerId](boost::system::error_code ec) {
         if (!ec) {
-            RequestVote req{_node->getCurrentTerm(),_id};
-            json reqMsg={
-                {"type","RequestVote"},
-                {"data",req}
+            RequestVote req{_node->getCurrentTerm(), _id};
+            json reqMsg = {
+                {"type", "RequestVote"},
+                {"data", req}
             };
             std::string message = reqMsg.dump() + "\n";
 
-            boost::asio::async_write(*socket, boost::asio::buffer(message), [](auto, auto) {});
+            auto buffer = std::make_shared<boost::asio::streambuf>();
+            boost::asio::async_write(*socket, boost::asio::buffer(message),
+                [this, socket, buffer](boost::system::error_code ec, std::size_t) {
+                    if (!ec) {
+                        // 异步读取 VoteResponse
+                        boost::asio::async_read_until(*socket, *buffer, '\n',
+                            [this, socket, buffer](boost::system::error_code ec, std::size_t) {
+                                if (!ec) {
+                                    std::istream is(buffer.get());
+                                    std::string line;
+                                    std::getline(is, line);
+                                    if (!line.empty()) {
+                                        std::cout << "[Node " << _id << "] Got VoteResponse: " << line << std::endl;
+                                        handleMessage(line, socket);
+                                    } else {
+                                        std::cerr << "[Node " << _id << "] received empty line (peer closed connection)\n";
+                                    }
+                                } else {
+                                    std::cerr << "[Node " << _id << "] Read error: " << ec.message() << std::endl;
+                                }
+                            });
+                    } else {
+                        std::cerr << "[Node " << _id << "] Write error: " << ec.message() << std::endl;
+                    }
+                });
 
+            std::cout << "[Node " << _id << "] Sending vote request to Node " << peerId << std::endl;
         }
     });
-
-
 }
+
