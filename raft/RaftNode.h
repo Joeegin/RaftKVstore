@@ -6,12 +6,13 @@
 #define RAFTNODE_H
 
 #include <functional>
-
+#include "../rpc/Message.h"
 enum class RaftRole {
     FOLLOWER,
     CANDIDATE,
     LEADER,
 };
+
 class RaftNode {
 public:
     RaftNode(int id,int totalNodes,std::function<void(int,int)>);
@@ -23,6 +24,13 @@ public:
     int getId() const{ return _id;};
     RaftRole getRole() const{ return _role;};
     int getCurrentTerm() const { return _currentTerm; };
+
+    void appendNewCommand(const std::string& command);
+    void sendAppendEntries(int peerId);
+    AppendResponse handleAppendEntries(const AppendEntries& req);
+    void receiveAppendResponse(int peerId, const AppendResponse& resp);
+    void applyLog();
+
 private:
     //选举状态转换
     void becomeFollower(int term);
@@ -42,6 +50,13 @@ private:
     RaftRole _role=RaftRole::FOLLOWER;
 
     std::function<void (int from,int to)> _sendVoteRequest;//发送投票请求的回调函数
+
+    std::vector<LogEntry> _logs;
+    int _commitIndex=0;//当前节点认为提交日志的最大索引
+    int _lastApplied=0;//最后一个被应用的日志索引
+
+    std::vector<int> _nextIndex;//Leader给每个Follower将要发送的日志索引
+    std::vector<int> _matchIndex;//每个Follower记录的已经确认复制的日志索引
 };
 
 
