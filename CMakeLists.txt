@@ -6,7 +6,19 @@ set(CMAKE_CXX_STANDARD 20)
 add_executable(RaftKVstore main.cpp
         kvstore/KVStore.cpp
         kvstore/KVStore.h
+        raft/RaftNode.cpp
+        raft/RaftNode.h
+        raft/RaftServer.cpp
+        raft/RaftServer.h
+        rpc/Message.h
 )
 
 find_package(Boost REQUIRED COMPONENTS system filesystem)
-target_link_libraries(RaftKVstore PRIVATE Boost::boost Boost::system Boost::filesystem)
+find_package(nlohmann_json REQUIRED)
+
+target_link_libraries(RaftKVstore PRIVATE
+        Boost::boost
+        Boost::system
+        Boost::filesystem
+        nlohmann_json::nlohmann_json)
+
