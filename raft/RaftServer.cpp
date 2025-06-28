@@ -16,7 +16,7 @@ using json = nlohmann::json;
 
 RaftServer::RaftServer(boost::asio::io_context &io_context, int id, int port, const std::vector<std::pair<int, int> > &peers)
     :_io_context(io_context),_id(id),_port(port),
-    _acceptor(io_context,tcp::endpoint(tcp::v4(),port)){
+    _acceptor(io_context,tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"),port)){
 
     //保存其他节点id和端口
     for(const auto & [peerid,peerport] :peers) {
@@ -50,6 +50,7 @@ void RaftServer::StartAcceptor() {
     _acceptor.async_accept(*socket,[this,socket](boost::system::error_code ec) {
         if (!ec) {
             handleConnection(socket);
+
         }
         StartAcceptor(); // 再次监听下一个连接
     });
@@ -64,6 +65,7 @@ void RaftServer::handleConnection(std::shared_ptr<tcp::socket> socket) {
                 std::string line;
                 std::getline(is, line);
                 handleMessage(line, socket);
+                std::cout <<"连接成功"<<std::endl;
             }
         });
 }
@@ -109,8 +111,8 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
         }
         if (message["type"] == "AppendResponse") {
             auto resp = message["data"].get<AppendResponse>();
-            int fromNodeId=message["from"].get<int>();
-            _node->receiveAppendResponse(fromNodeId, resp.term, resp.success);
+
+            _node->receiveAppendResponse(resp.from, resp.term, resp.success);
         }
     }catch (std::exception &e) {
         std::cerr << "[Node " << _id << "] Error parsing message: " << e.what() << std::endl;
@@ -127,6 +129,8 @@ void RaftServer::sendVoteRequest(int peerId) {
 
     socket->async_connect(endpoint, [this, socket, peerId](boost::system::error_code ec) {
         if (!ec) {
+            std::cout << "[Node " << _id << "] Connected to Node " << peerId << " for vote request" << std::endl;
+
             RequestVote req{_node->getCurrentTerm(), _id};
             json reqMsg = {
                 {"type", "RequestVote"},
@@ -149,18 +153,18 @@ void RaftServer::sendVoteRequest(int peerId) {
                                         std::cout << "[Node " << _id << "] Got VoteResponse: " << line << std::endl;
                                         handleMessage(line, socket);
                                     } else {
-                                        //std::cerr << "[Node " << _id << "] received empty line (peer closed connection)\n";
+                                        std::cerr << "[Node " << _id << "] received empty line (peer closed connection)\n";
                                     }
                                 } else {
-                                    //std::cerr << "[Node " << _id << "] Read error: " << ec.message() << std::endl;
+                                    std::cerr << "[Node " << _id << "] Read error: " << ec.message() << std::endl;
                                 }
                             });
                     } else {
-                        //std::cerr << "[Node " << _id << "] Write error: " << ec.message() << std::endl;
+                        std::cerr << "[Node " << _id << "] Write error: " << ec.message() << std::endl;
                     }
                 });
 
-            //std::cout << "[Node " << _id << "] Sending vote request to Node " << peerId << std::endl;
+            std::cout << "[Node " << _id << "] Sending vote request to Node " << peerId << std::endl;
         }
     });
 }

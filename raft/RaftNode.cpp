@@ -70,7 +70,7 @@ void RaftNode::receiveVoteRequest(int term, int candidateId) {
         becomeFollower(term);
         _votedFor=candidateId;
         std::cout << "[Node " << _id << "] votes for Node " << candidateId << " in term " << term << std::endl;
-        _sendVoteRequest(_id, candidateId);
+
     }
 }
 
