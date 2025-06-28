@@ -6,6 +6,8 @@
 #define RAFTNODE_H
 
 #include <functional>
+#include "../rpc/Message.h"
+#include "../kvstore/KVStore.h"
 
 enum class RaftRole {
     FOLLOWER,
@@ -23,6 +25,17 @@ public:
     int getId() const{ return _id;};
     RaftRole getRole() const{ return _role;};
     int getCurrentTerm() const { return _currentTerm; };
+
+    void receiveAppendEntries(const AppendEntries& ae, std::function<void(const AppendResponse&)> reply);
+    std::vector<LogEntry> getUncommittedEntries() const;
+    void commitTo(int index, KVStore& store);
+
+    //Leader广播AppendEntries
+    void appendEntries(const std::string& op,const std::string& key,const std::string& value);
+    void setAppendEntriesCallback(std::function<void(const AppendEntries&)>);
+
+    //待实现日志响应
+    void receiveAppendResponse();
 private:
     //选举状态转换
     void becomeFollower(int term);
@@ -42,6 +55,13 @@ private:
     RaftRole _role=RaftRole::FOLLOWER;
 
     std::function<void (int from,int to)> _sendVoteRequest;//发送投票请求的回调函数
+
+    int _commitIndex=-1;//已经提交的日志的索引
+    int _lastCommitIndex=-1;
+
+    std::vector<LogEntry> _logs;
+
+    std::function<void(const AppendEntries&)> _appendEntriesCallback;
 };
 
 

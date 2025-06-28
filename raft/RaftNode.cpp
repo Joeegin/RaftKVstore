@@ -70,3 +70,77 @@ void RaftNode::receiveVoteResponse(int term, bool voteGranted) {
         }
     }
 }
+
+void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(const AppendResponse &)> reply) {
+    if (ae.term<_currentTerm) {
+        reply({_currentTerm,false});
+        return;
+    }
+
+    becomeFollower(ae.term);
+    _electionElapsed=0;
+
+    //验证前一条日志
+    if (ae.prevLogIndex>=0 && (ae.prevLogIndex>=_logs.size() || _logs[ae.prevLogIndex].term !=ae.term)) {
+        reply({_currentTerm,false});
+        return;
+    }
+
+    //删除冲突日志
+    for (int i=0;i<ae.entries.size();++i) {
+        int logIndex=ae.prevLogIndex+1+i;
+        if (logIndex>=_logs.size()) break;
+
+        if (_logs[logIndex].term!=ae.term) {
+            _logs.resize(logIndex);
+            break;
+        }
+    }
+
+    //追加新日志
+    for (int i; i < ae.entries.size(); ++i) {
+        _logs.push_back(ae.entries[i]);
+    }
+
+    //更新提交日志的索引
+    if (ae.leaderCommit > _commitIndex) {
+        _commitIndex = std::min((int)_logs.size() - 1, ae.leaderCommit);
+        //触发状态机应用日志applyLogs();
+    }
+    //持久化日志，待实现
+
+    reply({ _currentTerm, true });
+}
+
+std::vector<LogEntry> RaftNode::getUncommittedEntries() const {
+    return std::vector<LogEntry>(_logs.begin() + _lastCommitIndex + 1, _logs.begin() + _commitIndex + 1);
+}
+
+void RaftNode::commitTo(int index, KVStore &store) {
+    while (_lastCommitIndex < index && _lastCommitIndex + 1 < _logs.size()) {
+        ++_lastCommitIndex;
+        const auto& entry = _logs[_lastCommitIndex];
+        store.put(entry.key, entry.value);
+    }
+
+}
+
+void RaftNode::appendEntries(const std::string& op,const std::string &key, const std::string &value) {
+    if (_role!=RaftRole::LEADER) {return;}
+
+    LogEntry entry = { _currentTerm, op,key, value };
+    _logs.push_back(entry);
+
+    //到此处
+    if (_appendEntriesCallback) {
+        AppendEntries ae={
+            _currentTerm,
+            _id,
+            (int)_logs.size()-2,
+            (int)(_logs.size() > 1 ? _logs[_logs.size()-2].term : 0),
+            {entry},
+            _commitIndex,
+        };
+        _appendEntriesCallback(ae);
+    }
+}

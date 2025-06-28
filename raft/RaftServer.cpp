@@ -72,7 +72,7 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
     try {
         auto message = json::parse(msg);//反序列化
         if (message.contains("type") && message["type"]=="RequestVote") {
-            RequestVote req=message["data"].get<RequestVote>();//反序列化
+            RequestVote req=message["data"].get<RequestVote>();
             std::cout << "[Node " << _id << "] received vote request from Node " << req.candidateId << std::endl;
             _node->receiveVoteRequest(req.term,req.candidateId);
             VoteResponse resp{req.term,true};
@@ -81,12 +81,35 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
                     {"data",resp}
             };
              std::string response=respMsg.dump()+"\n";//序列化响应并且在结尾加上换行
-            boost::asio::async_write(*socket,boost::asio::buffer(response),[](auto,auto) {
+            boost::asio::async_write(*socket,boost::asio::buffer(response),
+                [](boost::system::error_code ec, size_t) {
 
             });
-        }else if (message["type"] == "VoteResponse") {
+        }
+        if (message["type"] == "VoteResponse") {
             VoteResponse resp = message["data"].get<VoteResponse>();
             _node->receiveVoteResponse(resp.term, resp.voteGranted);
+        }
+        if (message["type"]=="AppendEntries") {
+            auto ae = message["data"].get<AppendEntries>();
+            _node->receiveAppendEntries(ae,[socket](const AppendResponse& aresp) {
+                json respMsg={
+                    {"type", "AppendEntriesResponse"},
+                    {"data", {
+                            {"term", aresp.term},
+                            {"success", aresp.success}}
+                    }
+                };
+                std::string response=respMsg.dump()+"\n";
+                boost::asio::async_write(*socket,boost::asio::buffer(response),
+                    [](boost::system::error_code ec, size_t) {
+
+                });
+            });
+        }
+        if (message["type"] == "AppendResponse") {
+            auto arsp = message["data"].get<AppendResponse>();
+            //待实现日志响应
         }
     }catch (std::exception &e) {
         std::cerr << "[Node " << _id << "] Error parsing message: " << e.what() << std::endl;
@@ -125,19 +148,23 @@ void RaftServer::sendVoteRequest(int peerId) {
                                         std::cout << "[Node " << _id << "] Got VoteResponse: " << line << std::endl;
                                         handleMessage(line, socket);
                                     } else {
-                                        std::cerr << "[Node " << _id << "] received empty line (peer closed connection)\n";
+                                        //std::cerr << "[Node " << _id << "] received empty line (peer closed connection)\n";
                                     }
                                 } else {
-                                    std::cerr << "[Node " << _id << "] Read error: " << ec.message() << std::endl;
+                                    //std::cerr << "[Node " << _id << "] Read error: " << ec.message() << std::endl;
                                 }
                             });
                     } else {
-                        std::cerr << "[Node " << _id << "] Write error: " << ec.message() << std::endl;
+                        //std::cerr << "[Node " << _id << "] Write error: " << ec.message() << std::endl;
                     }
                 });
 
-            std::cout << "[Node " << _id << "] Sending vote request to Node " << peerId << std::endl;
+            //std::cout << "[Node " << _id << "] Sending vote request to Node " << peerId << std::endl;
         }
     });
+}
+
+void RaftServer::appendToLog(const std::string &op, const std::string &kay, const std::string &value) {
+
 }
 

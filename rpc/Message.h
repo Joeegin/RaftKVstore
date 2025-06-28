@@ -25,9 +25,11 @@ struct VoteResponse {
 //添加raft同步日志
 struct LogEntry {
     int term;
-    std::string command;//客户端请求，例如put x 5
+    std::string op;
+    std::string key;
+    std::string value;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(LogEntry, term, command)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(LogEntry, term, op, key,value)
 };
 
 struct AppendEntries {
@@ -44,7 +46,7 @@ struct AppendEntries {
 struct AppendResponse {
     int term;
     bool success;
-
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(AppendResponse, term, success)
+    int from;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(AppendResponse, term, success, from)
 };
 #endif //MESSAGE_H

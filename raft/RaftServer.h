@@ -17,7 +17,7 @@ class RaftServer {
 public:
     RaftServer(boost::asio::io_context& io_context,int ip,int port, const std::vector<std::pair<int,int>>& peers);
     void run();
-
+    void appendToLog(const std::string& op,const std::string& kay,const std::string& value);
 private:
     void StartAcceptor();
     void handleConnection(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
