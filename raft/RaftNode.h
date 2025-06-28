@@ -32,10 +32,12 @@ public:
 
     //Leader广播AppendEntries
     void appendEntries(const std::string& op,const std::string& key,const std::string& value);
-    void setAppendEntriesCallback(std::function<void(const AppendEntries&)>);
+    void setAppendEntriesCallback(std::function<void(int,const AppendEntries&)> cb){ _appendEntriesCallback = cb;};
 
+    void sendAppendEntriesTo(int toNodeId);
+    std::function<void(int toNodeId, const AppendEntries&)> _sendAppendEntries;
     //待实现日志响应
-    void receiveAppendResponse();
+    void receiveAppendResponse(int fromNodeId,int term,bool success);
 private:
     //选举状态转换
     void becomeFollower(int term);
@@ -59,9 +61,14 @@ private:
     int _commitIndex=-1;//已经提交的日志的索引
     int _lastCommitIndex=-1;
 
+    std::vector<int> _nextIndex;//Leader给每个Follower将要发送的日志索引
+    std::vector<int> _matchIndex;//每个Follower记录的已经确认复制的日志索引
+
     std::vector<LogEntry> _logs;
 
-    std::function<void(const AppendEntries&)> _appendEntriesCallback;
+    std::function<void(int,const AppendEntries&)> _appendEntriesCallback;
+
+    //KVStore _kvstore;
 };
 
 

@@ -108,8 +108,9 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
             });
         }
         if (message["type"] == "AppendResponse") {
-            auto arsp = message["data"].get<AppendResponse>();
-            //待实现日志响应
+            auto resp = message["data"].get<AppendResponse>();
+            int fromNodeId=message["from"].get<int>();
+            _node->receiveAppendResponse(fromNodeId, resp.term, resp.success);
         }
     }catch (std::exception &e) {
         std::cerr << "[Node " << _id << "] Error parsing message: " << e.what() << std::endl;
@@ -164,7 +165,11 @@ void RaftServer::sendVoteRequest(int peerId) {
     });
 }
 
-void RaftServer::appendToLog(const std::string &op, const std::string &kay, const std::string &value) {
-
+void RaftServer::appendToLog(const std::string &op, const std::string &key, const std::string &value) {
+    if (_node->getRole() == RaftRole::LEADER) {
+        _node->appendEntries(op, key, value);
+    } else {
+        std::cout << "Not leader, cannot append" << std::endl;
+    }
 }
 

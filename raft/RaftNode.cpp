@@ -4,6 +4,7 @@
 
 #include "RaftNode.h"
 #include <iostream>
+#include <regex>
 
 static int randomTimeout() {
     return 150+std::rand()%150;
@@ -17,8 +18,14 @@ RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int)> callbac
 
 void RaftNode::tick() {
     _electionElapsed+=10;
-    if (_role!=RaftRole::LEADER && _electionElapsed>=_electionTimeout) {
-        becomeCandidate();
+    if (_role == RaftRole::LEADER) {
+        // 发送心跳
+        for (int i = 0; i < _totalNodes; ++i) {
+            if (i == _id) continue;
+            sendAppendEntriesTo(i);  // empty entries 即心跳
+        }
+    } else if (_electionElapsed >= _electionTimeout) {
+        becomeCandidate();  // 发起选举
     }
 }
 
@@ -47,6 +54,14 @@ void RaftNode::becomeCandidate() {
 
 void RaftNode::becomeLeader() {
     _role=RaftRole::LEADER;
+    _nextIndex = std::vector<int>(_totalNodes, _logs.size());
+    _matchIndex = std::vector<int>(_totalNodes, -1);
+
+    // 初始发送空的 AppendEntries 心跳
+    for (int i = 0; i < _totalNodes; ++i) {
+        if (i == _id) continue;
+        sendAppendEntriesTo(i);
+    }
     std::cout << "[Node " << _id << "] Becomes LEADER for term " << _currentTerm << std::endl;
 }
 
@@ -130,17 +145,71 @@ void RaftNode::appendEntries(const std::string& op,const std::string &key, const
 
     LogEntry entry = { _currentTerm, op,key, value };
     _logs.push_back(entry);
+    _matchIndex[_id]=_logs.size()-1;
 
-    //到此处
-    if (_appendEntriesCallback) {
-        AppendEntries ae={
-            _currentTerm,
-            _id,
-            (int)_logs.size()-2,
-            (int)(_logs.size() > 1 ? _logs[_logs.size()-2].term : 0),
-            {entry},
-            _commitIndex,
-        };
-        _appendEntriesCallback(ae);
+    for (int i = 0; i < _totalNodes; ++i) {
+        if (i == _id) continue;
+        sendAppendEntriesTo(i);
     }
 }
+
+void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
+    if (term>_currentTerm) {
+        becomeFollower(term);
+        return;
+    }
+
+    if (_role!=RaftRole::LEADER) {return;}
+
+    if (success) {
+        _matchIndex[fromNodeId]=_nextIndex[fromNodeId]-1;
+        _nextIndex[fromNodeId]=_nextIndex[fromNodeId]+1;
+
+        // 检查是否可以提交（多数节点已复制）
+        for (int N=_logs.size()-1;N>_commitIndex;--N) {
+            int count =1;
+            for (int i=0;i<_totalNodes;++i) {
+                if (i==_id){ continue;}
+                if (_matchIndex[i]>=N) {
+                    ++count;
+                }
+            }
+
+            if (count>_totalNodes/2 && _logs[N].term== _currentTerm) {
+                _commitIndex = N;
+                break;
+            }
+        }
+
+    }else {
+        _nextIndex[fromNodeId]=std::max(1, _nextIndex[fromNodeId] - 1);
+    }
+
+    // 无论成功与否，都重新尝试发送 AppendEntries
+    sendAppendEntriesTo(fromNodeId);
+}
+
+void RaftNode::sendAppendEntriesTo(int toNodeId) {
+    int nextIdx = _nextIndex[toNodeId];
+    int prevLogIdx = nextIdx - 1;
+    int prevLogTerm = (prevLogIdx >= 0 && prevLogIdx < _logs.size()) ? _logs[prevLogIdx].term : 0;
+
+    std::vector<LogEntry> entries;
+    if (nextIdx < _logs.size()) {
+        entries.insert(entries.end(), _logs.begin() + nextIdx, _logs.end());
+    }
+
+    AppendEntries ae{
+        _currentTerm,
+        _id,
+        prevLogIdx,
+        prevLogTerm,
+        entries,
+        _commitIndex
+    };
+
+    if (_sendAppendEntries) {
+        _sendAppendEntries(toNodeId, ae);
+    }
+}
+
