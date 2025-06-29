@@ -16,7 +16,7 @@ enum class RaftRole {
 };
 class RaftNode {
 public:
-    RaftNode(int id,int totalNodes,std::function<void(int,int)>);
+    RaftNode(int id,int totalNodes,std::function<void(int,int,int)>);
 
     void tick();//模拟时钟，用于超时检测和心跳检测
     void receiveVoteRequest(int term,int candidateId);//处理收到的投票请求
@@ -56,7 +56,7 @@ private:
 
     RaftRole _role=RaftRole::FOLLOWER;
 
-    std::function<void (int from,int to)> _sendVoteRequest;//发送投票请求的回调函数
+    std::function<void (int from,int to,int term)> _sendVoteRequest;//发送投票请求的回调函数
 
     int _commitIndex=-1;//已经提交的日志的索引
     int _lastCommitIndex=-1;

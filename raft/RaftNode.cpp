@@ -7,10 +7,10 @@
 #include <regex>
 
 static int randomTimeout() {
-    return 150+std::rand()%150;
+    return 1000+std::rand()%500;
 }
 
-RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int)> callback)
+RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int,int)> callback)
     :_id(id),_totalNodes(totalNodes),_sendVoteRequest(callback){
     _electionTimeout =randomTimeout();
     _electionElapsed=0;
@@ -18,14 +18,8 @@ RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int)> callbac
 
 void RaftNode::tick() {
     _electionElapsed+=10;
-    if (_role == RaftRole::LEADER) {
-        // 发送心跳
-        for (int i = 0; i < _totalNodes; ++i) {
-            if (i == _id) continue;
-            sendAppendEntriesTo(i);  // empty entries 即心跳
-        }
-    } else if (_electionElapsed >= _electionTimeout) {
-        becomeCandidate();  // 发起选举
+    if (_role!=RaftRole::LEADER && _electionElapsed>=_electionTimeout) {
+        becomeCandidate();
     }
 }
 
@@ -46,7 +40,7 @@ void RaftNode::becomeCandidate() {
     std::cout << "[Node " << _id << "] Becomes CANDIDATE for term " << _currentTerm << std::endl;
     for (int i = 0; i < _totalNodes; ++i) {
         if (i != _id) {
-            _sendVoteRequest(_id, i);
+            _sendVoteRequest(_id, i,_currentTerm);
         }
     }
 
