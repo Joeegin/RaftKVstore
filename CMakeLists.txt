@@ -11,6 +11,7 @@ add_executable(RaftKVstore main.cpp
         raft/RaftServer.cpp
         raft/RaftServer.h
         rpc/Message.h
+
 )
 
 find_package(Boost REQUIRED COMPONENTS system filesystem)
@@ -22,3 +23,10 @@ target_link_libraries(RaftKVstore PRIVATE
         Boost::filesystem
         nlohmann_json::nlohmann_json)
 
+add_executable(raft_client
+        client/RaftClient.cpp
+        ${COMMON_SOURCES}
+)
+target_link_libraries(raft_client
+        PRIVATE Boost::filesystem Boost::system
+)

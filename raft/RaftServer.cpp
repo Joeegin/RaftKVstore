@@ -28,6 +28,11 @@ RaftServer::RaftServer(boost::asio::io_context &io_context, int id, int port, co
     _node = std::make_shared<RaftNode>(id, peers.size(), [this](int from, int to,int term) {
         sendVoteRequest(from,to,term);
     });
+    
+    // 设置发送AppendEntries的回调函数
+    _node->setAppendEntriesCallback([this](int toNodeId, const AppendEntries& ae) {
+        sendAppendEntries(toNodeId, ae);
+    });
 }
 
 void RaftServer::run() {
@@ -114,6 +119,62 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
 
             _node->receiveAppendResponse(resp.from, resp.term, resp.success);
         }
+        if (message["type"] == "ClientPut") {
+            std::string key = message["key"];
+            std::string value = message["value"];
+
+            if (_node->getRole()==RaftRole::LEADER) {
+                std::string op="Put";
+                _node->appendNewCommand(_node->getCurrentTerm(),op,key,value);
+                json respMsg = {
+                    {"type", "ClientResponse"},
+                    {"success", true},
+                    {"leaderId", _id}
+                };
+                std::string response=respMsg.dump()+"\n";
+                boost::asio::async_write(*socket,boost::asio::buffer(response),
+                    [](boost::system::error_code ec,size_t) {
+
+                });
+            }else {
+                json respMsg = {
+                    {"type", "ClientResponse"},
+                    {"success", false},
+                    {"leaderId", _node->getLeaderId()},
+                    {"error", "Not leader"}
+                };
+                std::string response=respMsg.dump()+"\n";
+                boost::asio::async_write(*socket,boost::asio::buffer(response),
+                    [](boost::system::error_code ec,size_t) {});
+            }
+        }
+        if (message["type"] == "ClientGet") {
+            std::string key = message["key"];
+            if (_node->getRole()==RaftRole::LEADER) {
+                auto value = _node->getValue(key);
+                json respMsg={
+                    {"type", "ClientResponse"},
+                    {"success", true},
+                    {"leaderId", _id},
+                    {"value", value.value_or("NOT_FOUND")}
+                };
+                std::string response=respMsg.dump()+"\n";
+                boost::asio::async_write(*socket,boost::asio::buffer(response),
+                        [](boost::system::error_code ec, size_t) {
+
+                    });
+            } else {
+                json respMsg = {
+                    {"type", "ClientResponse"},
+                    {"success", false},
+                    {"leaderId", _node->getLeaderId()},
+                    {"error", "Not leader"}
+                };
+                std::string response=respMsg.dump()+"\n";
+                boost::asio::async_write(*socket,boost::asio::buffer(response),
+                    [](boost::system::error_code ec,size_t) {});
+            }
+        }
     }catch (std::exception &e) {
         std::cerr << "[Node " << _id << "] Error parsing message: " << e.what() << std::endl;
     }
@@ -178,5 +239,53 @@ void RaftServer::appendToLog(const std::string &op, const std::string &key, cons
     } else {
         std::cout << "Not leader, cannot append" << std::endl;
     }
+}
+
+void RaftServer::sendAppendEntries(int toNodeId, const AppendEntries& ae) {
+    auto it = _peerPorts.find(toNodeId);
+    if (it == _peerPorts.end()) return;
+
+    int peerport = it->second;
+    auto socket = std::make_shared<tcp::socket>(_io_context);
+    auto endpoint = tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), peerport);
+
+    socket->async_connect(endpoint, [this, socket, toNodeId, ae](boost::system::error_code ec) {
+        if (!ec) {
+            std::cout << "[Node " << _id << "] Connected to Node " << toNodeId << " for append entries" << std::endl;
+
+            json reqMsg = {
+                {"type", "AppendEntries"},
+                {"data", ae}
+            };
+            std::string message = reqMsg.dump() + "\n";
+
+            auto buffer = std::make_shared<boost::asio::streambuf>();
+            boost::asio::async_write(*socket, boost::asio::buffer(message),
+                [this, socket, buffer, toNodeId](boost::system::error_code ec, std::size_t) {
+                    if (!ec) {
+                        boost::asio::async_read_until(*socket, *buffer, '\n',
+                            [this, socket, buffer, toNodeId](boost::system::error_code ec, std::size_t) {
+                                if (!ec) {
+                                    std::istream is(buffer.get());
+                                    std::string line;
+                                    std::getline(is, line);
+                                    if (!line.empty()) {
+                                        std::cout << "[AppendEntries] Got response from Node " << toNodeId << ": " << line << std::endl;
+                                        handleMessage(line, socket);
+                                    }
+                                } else {
+                                    std::cerr << "[AppendEntries] Read error from Node " << toNodeId << ": " << ec.message() << std::endl;
+                                }
+                            });
+                    } else {
+                        std::cerr << "[AppendEntries] Write error to Node " << toNodeId << ": " << ec.message() << std::endl;
+                    }
+                });
+
+            std::cout << "[AppendEntries] Sending to Node " << toNodeId << std::endl;
+        } else {
+            std::cerr << "[AppendEntries] Connect failed to Node " << toNodeId << ": " << ec.message() << std::endl;
+        }
+    });
 }
 

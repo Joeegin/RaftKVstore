@@ -38,12 +38,20 @@ public:
     std::function<void(int toNodeId, const AppendEntries&)> _sendAppendEntries;
     //待实现日志响应
     void receiveAppendResponse(int fromNodeId,int term,bool success);
+
+    void appendNewCommand(int currentTerm,std::string& op,std::string& key,std::string& value);
+    std::optional<std::string> getValue(const std::string& key);
+
+    int getLeaderId() const{
+        return _leaderId;
+    }
 private:
     //选举状态转换
     void becomeFollower(int term);
     void becomeCandidate();
     void becomeLeader();
 
+    int _leaderId=-1;
     int _id;//节点id
     int _totalNodes;//集群节点数量
     int _currentTerm=0;//当前任期
@@ -67,8 +75,8 @@ private:
     std::vector<LogEntry> _logs;
 
     std::function<void(int,const AppendEntries&)> _appendEntriesCallback;
-
-    //KVStore _kvstore;
+    std::string filename="kvstore"+std::to_string(_id);
+    KVStore _kvstore;
 };
 
 

@@ -11,9 +11,10 @@ static int randomTimeout() {
 }
 
 RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int,int)> callback)
-    :_id(id),_totalNodes(totalNodes),_sendVoteRequest(callback){
+    :_id(id),_totalNodes(totalNodes),_sendVoteRequest(callback),_kvstore(filename+".txt") {
     _electionTimeout =randomTimeout();
     _electionElapsed=0;
+
 }
 
 void RaftNode::tick() {
@@ -29,6 +30,8 @@ void RaftNode::becomeFollower(int term) {
     _votedFor=-1;
     _electionElapsed=0;
     _electionTimeout=randomTimeout();
+    _leaderId = -1; // 重置leaderId
+    std::cout << "[Node " << _id << "] Becomes FOLLOWER for term " << _currentTerm << ", leaderId reset to -1" << std::endl;
 }
 
 void RaftNode::becomeCandidate() {
@@ -48,6 +51,7 @@ void RaftNode::becomeCandidate() {
 
 void RaftNode::becomeLeader() {
     _role=RaftRole::LEADER;
+    _leaderId=_id;
     _nextIndex = std::vector<int>(_totalNodes, _logs.size());
     _matchIndex = std::vector<int>(_totalNodes, -1);
 
@@ -63,6 +67,7 @@ void RaftNode::receiveVoteRequest(int term, int candidateId) {
     if (term>_currentTerm) {
         becomeFollower(term);
         _votedFor=candidateId;
+
         std::cout << "[Node " << _id << "] votes for Node " << candidateId << " in term " << term << std::endl;
 
     }
@@ -87,6 +92,8 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
     }
 
     becomeFollower(ae.term);
+    _leaderId=ae.leaderId;
+    std::cout << "[Node " << _id << "] Updated leaderId to " << _leaderId << " from AppendEntries" << std::endl;
     _electionElapsed=0;
 
     //验证前一条日志
@@ -106,8 +113,9 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
         }
     }
 
+
     //追加新日志
-    for (int i; i < ae.entries.size(); ++i) {
+    for (int i = 0; i < ae.entries.size(); ++i) {
         _logs.push_back(ae.entries[i]);
     }
 
@@ -207,3 +215,12 @@ void RaftNode::sendAppendEntriesTo(int toNodeId) {
     }
 }
 
+void RaftNode::appendNewCommand(int currentTerm,std::string& op,std::string& key,std::string &value) {
+    _kvstore.put(key, value);
+    _logs.push_back({currentTerm,op,key,value});
+}
+
+std::optional<std::string> RaftNode::getValue(const std::string &key) {
+    std::optional<std::string> value=_kvstore.get(key);
+    return value;
+}
