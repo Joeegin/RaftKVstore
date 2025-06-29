@@ -33,6 +33,7 @@ RaftServer::RaftServer(boost::asio::io_context &io_context, int id, int port, co
     _node->setAppendEntriesCallback([this](int toNodeId, const AppendEntries& ae) {
         sendAppendEntries(toNodeId, ae);
     });
+
 }
 
 void RaftServer::run() {
@@ -82,7 +83,15 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
             RequestVote req=message["data"].get<RequestVote>();
             std::cout << "[Node " << _id << "] received vote request from Node " << req.candidateId << std::endl;
             _node->receiveVoteRequest(req.term,req.candidateId);
-            VoteResponse resp{req.term,true};
+            
+            // 根据Raft协议决定是否投票
+            bool voteGranted = false;
+            if (req.term >= _node->getCurrentTerm() && 
+                (_node->getRole() != RaftRole::LEADER || req.term > _node->getCurrentTerm())) {
+                voteGranted = true;
+            }
+            
+            VoteResponse resp{req.term, voteGranted};
             json respMsg={
                 {"type","VoteResponse"},
                     {"data",resp}
@@ -99,6 +108,7 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
         }
         if (message["type"]=="AppendEntries") {
             auto ae = message["data"].get<AppendEntries>();
+            std::cout << "[Node " << _id << "] received AppendEntries from Node " << ae.leaderId << " term " << ae.term << std::endl;
             _node->receiveAppendEntries(ae,[socket](const AppendResponse& aresp) {
                 json respMsg={
                     {"type", "AppendEntriesResponse"},
@@ -137,10 +147,12 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
 
                 });
             }else {
+                int currentLeaderId = _node->getLeaderId();
+                std::cout << "[Node " << _id << "] Not leader, current leaderId: " << currentLeaderId << std::endl;
                 json respMsg = {
                     {"type", "ClientResponse"},
                     {"success", false},
-                    {"leaderId", _node->getLeaderId()},
+                    {"leaderId", currentLeaderId},
                     {"error", "Not leader"}
                 };
                 std::string response=respMsg.dump()+"\n";
@@ -164,10 +176,12 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
 
                     });
             } else {
+                int currentLeaderId = _node->getLeaderId();
+                std::cout << "[Node " << _id << "] Not leader, current leaderId: " << currentLeaderId << std::endl;
                 json respMsg = {
                     {"type", "ClientResponse"},
                     {"success", false},
-                    {"leaderId", _node->getLeaderId()},
+                    {"leaderId", currentLeaderId},
                     {"error", "Not leader"}
                 };
                 std::string response=respMsg.dump()+"\n";
@@ -189,7 +203,7 @@ void RaftServer::sendVoteRequest(int fromId,int peerId,int term) {
     auto endpoint = tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), peerport);
 
     socket->async_connect(endpoint, [this, socket, fromId, peerId, term](boost::system::error_code ec) {
-        std::cerr << "connect failed: " << ec.message() << std::endl;
+        std::cerr << "connect failed: " << ec.message() <<"("<<ec.value() <<")"<<std::endl;
         if (!ec) {
             std::cout << "[Node " << fromId << "] Connected to Node " << peerId << " for vote request" << std::endl;
 
@@ -227,6 +241,10 @@ void RaftServer::sendVoteRequest(int fromId,int peerId,int term) {
 
             std::cout << "[Vote] Sending RequestVote to Node " << peerId << std::endl;
         } else {
+            std::cerr << "Failed to connect to Node " << peerId
+            << " on port " << _peerPorts[peerId]
+            << ": " << ec.message() << " (code: " << ec.value() << ")" << std::endl;
+
             std::cerr << "[Vote] Connect failed: " << ec.message() << std::endl;
         }
     });
@@ -250,6 +268,7 @@ void RaftServer::sendAppendEntries(int toNodeId, const AppendEntries& ae) {
     auto endpoint = tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), peerport);
 
     socket->async_connect(endpoint, [this, socket, toNodeId, ae](boost::system::error_code ec) {
+
         if (!ec) {
             std::cout << "[Node " << _id << "] Connected to Node " << toNodeId << " for append entries" << std::endl;
 

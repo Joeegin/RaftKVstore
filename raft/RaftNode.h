@@ -75,7 +75,7 @@ private:
     std::vector<LogEntry> _logs;
 
     std::function<void(int,const AppendEntries&)> _appendEntriesCallback;
-    std::string filename="kvstore"+std::to_string(_id);
+    std::string filename="kvstore"+std::to_string(_id)+".txt";
     KVStore _kvstore;
 };
 

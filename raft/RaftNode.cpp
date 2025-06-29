@@ -7,11 +7,11 @@
 #include <regex>
 
 static int randomTimeout() {
-    return 1000+std::rand()%500;
+    return 3000+std::rand()%2000;  // 3-5秒的随机超时
 }
 
 RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int,int)> callback)
-    :_id(id),_totalNodes(totalNodes),_sendVoteRequest(callback),_kvstore(filename+".txt") {
+    :_id(id),_totalNodes(totalNodes),_sendVoteRequest(callback),_kvstore(filename) {
     _electionTimeout =randomTimeout();
     _electionElapsed=0;
 
@@ -19,6 +19,7 @@ RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int,int)> cal
 
 void RaftNode::tick() {
     _electionElapsed+=10;
+
     if (_role!=RaftRole::LEADER && _electionElapsed>=_electionTimeout) {
         becomeCandidate();
     }
@@ -28,45 +29,50 @@ void RaftNode::becomeFollower(int term) {
     _currentTerm=term;
     _role=RaftRole::FOLLOWER;
     _votedFor=-1;
-    _electionElapsed=0;
-    _electionTimeout=randomTimeout();
-    _leaderId = -1; // 重置leaderId
+    _votesReceived=0;
+    _electionElapsed=0;//重制定时器
+    _electionTimeout=randomTimeout();//重新生成一个时间上限
+
     std::cout << "[Node " << _id << "] Becomes FOLLOWER for term " << _currentTerm << ", leaderId reset to -1" << std::endl;
 }
 
 void RaftNode::becomeCandidate() {
-    _currentTerm++;
+    _currentTerm++;//任期加一
     _role=RaftRole::CANDIDATE;
-    _votedFor=1;
-    _electionElapsed=0;
+    _votedFor=_id;//给自己投票
+    _votesReceived=1;
+    _electionElapsed=0;//重制定时器
     _electionTimeout=randomTimeout();
     std::cout << "[Node " << _id << "] Becomes CANDIDATE for term " << _currentTerm << std::endl;
+
+    //向所有节点拉票
     for (int i = 0; i < _totalNodes; ++i) {
         if (i != _id) {
             _sendVoteRequest(_id, i,_currentTerm);
         }
     }
-
 }
 
 void RaftNode::becomeLeader() {
     _role=RaftRole::LEADER;
-    _leaderId=_id;
+    _leaderId=_id;//更新leaderid
+
     _nextIndex = std::vector<int>(_totalNodes, _logs.size());
-    _matchIndex = std::vector<int>(_totalNodes, -1);
+    _matchIndex = std::vector<int>(_totalNodes, _logs.size()-1);
 
     // 初始发送空的 AppendEntries 心跳
     for (int i = 0; i < _totalNodes; ++i) {
         if (i == _id) continue;
-        sendAppendEntriesTo(i);
+        sendAppendEntriesTo(i);//发送心跳包
     }
     std::cout << "[Node " << _id << "] Becomes LEADER for term " << _currentTerm << std::endl;
 }
 
 void RaftNode::receiveVoteRequest(int term, int candidateId) {
+    //收到选举者的拉票请求
     if (term>_currentTerm) {
-        becomeFollower(term);
-        _votedFor=candidateId;
+        becomeFollower(term);//重新变成跟随者
+        _votedFor=candidateId;//投给选举者
 
         std::cout << "[Node " << _id << "] votes for Node " << candidateId << " in term " << term << std::endl;
 
@@ -75,18 +81,34 @@ void RaftNode::receiveVoteRequest(int term, int candidateId) {
 
 void RaftNode::receiveVoteResponse(int term, bool voteGranted) {
     if (_role!=RaftRole::CANDIDATE || term!=_currentTerm) {
+        std::cout << "[Node " << _id << "] Ignoring vote response: role=" << (int)_role << ", term=" << term << ", currentTerm=" << _currentTerm << std::endl;
         return ;
     }
     if (voteGranted) {
-        _votesReceived++;
+
+        _votesReceived++;//票数加一
+        std::cout << "[Node " << _id << "] Received vote, total votes: " << _votesReceived << "/" << (_totalNodes/2 + 1) << std::endl;
+        //获得大多数人的票，成为leader
         if (_votesReceived > _totalNodes / 2) {
             becomeLeader();
         }
+    } else {
+        std::cout << "[Node " << _id << "] Vote denied" << std::endl;
     }
 }
 
 void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(const AppendResponse &)> reply) {
+    std::cout << "[Node " << _id << "] Handling AppendEntries from Node " << ae.leaderId
+              << " (term=" << ae.term << "), currentTerm=" << _currentTerm << std::endl;
+
     if (ae.term<_currentTerm) {
+        if (ae.term < _currentTerm) {
+            std::cout << "[Node " << _id << "] Rejecting AppendEntries from Node " << ae.leaderId
+                      << " due to stale term " << ae.term << " < " << _currentTerm << std::endl;
+            reply({_currentTerm, false});
+            return;
+        }
+
         reply({_currentTerm,false});
         return;
     }
@@ -97,8 +119,13 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
     _electionElapsed=0;
 
     //验证前一条日志
-    if (ae.prevLogIndex>=0 && (ae.prevLogIndex>=_logs.size() || _logs[ae.prevLogIndex].term !=ae.term)) {
+    if (ae.prevLogIndex>=0 && (ae.prevLogIndex>=_logs.size() || _logs[ae.prevLogIndex].term !=ae.prevLogTerm)) {
         reply({_currentTerm,false});
+        std::cout << "[Node " << _id << "] Received AppendEntries: term=" << ae.term
+          << ", leaderId=" << ae.leaderId
+          << ", prevLogIndex=" << ae.prevLogIndex
+          << ", logs.size=" << _logs.size() << std::endl;
+
         return;
     }
 
@@ -143,6 +170,7 @@ void RaftNode::commitTo(int index, KVStore &store) {
 }
 
 void RaftNode::appendEntries(const std::string& op,const std::string &key, const std::string &value) {
+
     if (_role!=RaftRole::LEADER) {return;}
 
     LogEntry entry = { _currentTerm, op,key, value };
@@ -158,6 +186,7 @@ void RaftNode::appendEntries(const std::string& op,const std::string &key, const
 void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
     if (term>_currentTerm) {
         becomeFollower(term);
+        _leaderId=fromNodeId;
         return;
     }
 
@@ -191,8 +220,9 @@ void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
     sendAppendEntriesTo(fromNodeId);
 }
 
+//心跳包以及日志同步
 void RaftNode::sendAppendEntriesTo(int toNodeId) {
-    int nextIdx = _nextIndex[toNodeId];
+    int nextIdx = _nextIndex[toNodeId];//toNode节点接受的下一条日志
     int prevLogIdx = nextIdx - 1;
     int prevLogTerm = (prevLogIdx >= 0 && prevLogIdx < _logs.size()) ? _logs[prevLogIdx].term : 0;
 
@@ -213,6 +243,8 @@ void RaftNode::sendAppendEntriesTo(int toNodeId) {
     if (_sendAppendEntries) {
         _sendAppendEntries(toNodeId, ae);
     }
+    std::cout << "[Node " << _id << "] sendAppendEntriesTo(" << toNodeId << ") entries=" << ae.entries.size() << " term=" << ae.term << std::endl;
+
 }
 
 void RaftNode::appendNewCommand(int currentTerm,std::string& op,std::string& key,std::string &value) {
