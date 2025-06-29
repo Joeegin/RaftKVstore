@@ -49,4 +49,23 @@ struct AppendResponse {
     int from;
     NLOHMANN_DEFINE_TYPE_INTRUSIVE(AppendResponse, term, success, from)
 };
+
+struct ClientPut {
+    std::string key;
+    std::string value;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ClientPut,key,value)
+};
+
+struct ClientGet {
+    std::string key;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ClientGet,key)
+};
+
+struct ClientResponse {
+    int leaderId;
+    std::string value;
+    bool success;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ClientResponse,leaderId,value,success)
+};
 #endif //MESSAGE_H
