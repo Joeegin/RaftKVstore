@@ -25,8 +25,8 @@ RaftServer::RaftServer(boost::asio::io_context &io_context, int id, int port, co
         }
     }
     // 创建 RaftNode，传入发送投票的函数
-    _node = std::make_shared<RaftNode>(id, peers.size(), [this](int from, int to) {
-        sendVoteRequest(to);
+    _node = std::make_shared<RaftNode>(id, peers.size(), [this](int from, int to,int term) {
+        sendVoteRequest(from,to,term);
     });
 }
 
@@ -38,7 +38,7 @@ void RaftServer::run() {
     std::thread([this]() {
         while (true) {
             _node->tick();
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }).detach();
 
@@ -65,7 +65,7 @@ void RaftServer::handleConnection(std::shared_ptr<tcp::socket> socket) {
                 std::string line;
                 std::getline(is, line);
                 handleMessage(line, socket);
-                std::cout <<"连接成功"<<std::endl;
+                //std::cout <<"连接成功"<<std::endl;
             }
         });
 }
@@ -119,19 +119,20 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
     }
 }
 
-void RaftServer::sendVoteRequest(int peerId) {
+void RaftServer::sendVoteRequest(int fromId,int peerId,int term) {
     auto it = _peerPorts.find(peerId);
     if (it == _peerPorts.end()) return;
 
-    auto peerport = it->second;
+    int peerport = it->second;
     auto socket = std::make_shared<tcp::socket>(_io_context);
-    auto endpoint = tcp::endpoint(tcp::v4(), peerport);
+    auto endpoint = tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), peerport);
 
-    socket->async_connect(endpoint, [this, socket, peerId](boost::system::error_code ec) {
+    socket->async_connect(endpoint, [this, socket, fromId, peerId, term](boost::system::error_code ec) {
+        std::cerr << "connect failed: " << ec.message() << std::endl;
         if (!ec) {
-            std::cout << "[Node " << _id << "] Connected to Node " << peerId << " for vote request" << std::endl;
+            std::cout << "[Node " << fromId << "] Connected to Node " << peerId << " for vote request" << std::endl;
 
-            RequestVote req{_node->getCurrentTerm(), _id};
+            RequestVote req{term, fromId};
             json reqMsg = {
                 {"type", "RequestVote"},
                 {"data", req}
@@ -142,7 +143,6 @@ void RaftServer::sendVoteRequest(int peerId) {
             boost::asio::async_write(*socket, boost::asio::buffer(message),
                 [this, socket, buffer](boost::system::error_code ec, std::size_t) {
                     if (!ec) {
-                        // 异步读取 VoteResponse
                         boost::asio::async_read_until(*socket, *buffer, '\n',
                             [this, socket, buffer](boost::system::error_code ec, std::size_t) {
                                 if (!ec) {
@@ -150,23 +150,26 @@ void RaftServer::sendVoteRequest(int peerId) {
                                     std::string line;
                                     std::getline(is, line);
                                     if (!line.empty()) {
-                                        std::cout << "[Node " << _id << "] Got VoteResponse: " << line << std::endl;
+                                        std::cout << "[Vote] Got VoteResponse: " << line << std::endl;
                                         handleMessage(line, socket);
                                     } else {
-                                        std::cerr << "[Node " << _id << "] received empty line (peer closed connection)\n";
+                                        std::cerr << "[Vote] empty line from peer\n";
                                     }
                                 } else {
-                                    std::cerr << "[Node " << _id << "] Read error: " << ec.message() << std::endl;
+                                    std::cerr << "[Vote] Read error: " << ec.message() << std::endl;
                                 }
                             });
                     } else {
-                        std::cerr << "[Node " << _id << "] Write error: " << ec.message() << std::endl;
+                        std::cerr << "[Vote] Write error: " << ec.message() << std::endl;
                     }
                 });
 
-            std::cout << "[Node " << _id << "] Sending vote request to Node " << peerId << std::endl;
+            std::cout << "[Vote] Sending RequestVote to Node " << peerId << std::endl;
+        } else {
+            std::cerr << "[Vote] Connect failed: " << ec.message() << std::endl;
         }
     });
+
 }
 
 void RaftServer::appendToLog(const std::string &op, const std::string &key, const std::string &value) {

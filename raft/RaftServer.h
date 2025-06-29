@@ -15,14 +15,14 @@
 
 class RaftServer {
 public:
-    RaftServer(boost::asio::io_context& io_context,int ip,int port, const std::vector<std::pair<int,int>>& peers);
+    RaftServer(boost::asio::io_context& io_context,int id,int port, const std::vector<std::pair<int,int>>& peers);
     void run();
     void appendToLog(const std::string& op,const std::string& kay,const std::string& value);
 private:
     void StartAcceptor();
     void handleConnection(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void handleMessage(const std::string& msg, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
-    void sendVoteRequest(int peerId);
+    void sendVoteRequest(int from,int peerId,int term);
 
     int _id;
     int _port;
