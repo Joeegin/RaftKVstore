@@ -36,7 +36,7 @@ public:
 
     void sendAppendEntriesTo(int toNodeId);
     std::function<void(int toNodeId, const AppendEntries&)> _sendAppendEntries;//心跳包以及日志同步回调函数
-    //待实现日志响应
+    //待实现心跳和日志响应
     void receiveAppendResponse(int fromNodeId,int term,bool success);
 
     void appendNewCommand(int currentTerm,std::string& op,std::string& key,std::string& value);

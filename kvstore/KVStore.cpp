@@ -16,9 +16,11 @@ KVStore::~KVStore() {
 
 void KVStore::put(const std::string &key, const std::string &value) {
     _store[key]=value;
+    saveToDisk();
 }
 
 std::optional<std::string> KVStore::get(const std::string &key) const {
+
     auto it=_store.find(key);
     if (it!=_store.end()) {
         return it->second;

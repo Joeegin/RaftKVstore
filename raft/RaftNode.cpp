@@ -71,6 +71,7 @@ void RaftNode::becomeLeader() {
     _nextIndex = std::vector<int>(_totalNodes, _logs.size());
     _matchIndex = std::vector<int>(_totalNodes, _logs.size()-1);
 
+    commitTo(_commitIndex,_kvstore);
     // 初始发送空的 AppendEntries 心跳
     for (int i = 0; i < _totalNodes; ++i) {
         if (i == _id) continue;
@@ -121,12 +122,12 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
 
     becomeFollower(ae.term);
     _leaderId=ae.leaderId;
-    std::cout << "[Node " << _id << "] Updated leaderId to " << _leaderId << " from AppendEntries" << std::endl;
     _electionElapsed=0;
+    std::cout << "[Node " << _id << "] Updated leaderId to " << _leaderId << " from AppendEntries" << std::endl;
 
     //验证前一条日志
     if (ae.prevLogIndex>=0 && (ae.prevLogIndex>=_logs.size() || _logs[ae.prevLogIndex].term !=ae.prevLogTerm)) {
-        reply({_currentTerm,false});
+        reply({_currentTerm,false,ae.leaderId});
         std::cout << "[Node " << _id << "] Received AppendEntries: term=" << ae.term
           << ", leaderId=" << ae.leaderId
           << ", prevLogIndex=" << ae.prevLogIndex
@@ -154,8 +155,9 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
 
     //更新提交日志的索引
     if (ae.leaderCommit > _commitIndex) {
-        _commitIndex = std::min((int)_logs.size() - 1, ae.leaderCommit);
-        //触发状态机应用日志applyLogs();
+        int newCommitIndex = std::min((int)_logs.size() - 1, ae.leaderCommit);
+        commitTo(newCommitIndex, _kvstore);
+        _commitIndex = newCommitIndex;
     }
     //持久化日志，待实现
 
@@ -171,6 +173,8 @@ void RaftNode::commitTo(int index, KVStore &store) {
         ++_lastCommitIndex;
         const auto& entry = _logs[_lastCommitIndex];
         store.put(entry.key, entry.value);
+
+        std::cout<<"[commitTo]"<<entry.op<<entry.key<<entry.value<<std::endl;
     }
 
 }
@@ -227,7 +231,6 @@ void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
 }
 
 //心跳包以及日志同步
-// 在 RaftNode.cpp 中改进 sendAppendEntriesTo
 void RaftNode::sendAppendEntriesTo(int toNodeId) {
     int nextIdx = _nextIndex[toNodeId];
     int prevLogIdx = nextIdx - 1;
@@ -259,7 +262,8 @@ void RaftNode::sendAppendEntriesTo(int toNodeId) {
 }
 
 void RaftNode::appendNewCommand(int currentTerm,std::string& op,std::string& key,std::string &value) {
-    _kvstore.put(key, value);
+
+    if (op=="Put") _kvstore.put(key, value);
     _logs.push_back({currentTerm,op,key,value});
 }
 
