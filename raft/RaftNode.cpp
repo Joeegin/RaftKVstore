@@ -7,7 +7,7 @@
 #include <regex>
 
 static int randomTimeout() {
-    return 3000+std::rand()%2000;  // 3-5秒的随机超时
+    return 1500+std::rand()%1000;  // 1.5-2.5秒的随机超时
 }
 
 RaftNode::RaftNode(int id, int totalNodes, std::function<void(int, int,int)> callback)
@@ -22,6 +22,17 @@ void RaftNode::tick() {
 
     if (_role!=RaftRole::LEADER && _electionElapsed>=_electionTimeout) {
         becomeCandidate();
+    }
+    // 新增：如果自己是 LEADER，定期发送心跳包
+    if (_role == RaftRole::LEADER) {
+        _heartbeatElapsed += 10;
+        if (_heartbeatElapsed >= _heartbeatInterval) {
+            for (int i = 0; i < _totalNodes; ++i) {
+                if (i == _id) continue;
+                sendAppendEntriesTo(i);
+            }
+            _heartbeatElapsed = 0;
+        }
     }
 }
 
@@ -102,14 +113,9 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
               << " (term=" << ae.term << "), currentTerm=" << _currentTerm << std::endl;
 
     if (ae.term<_currentTerm) {
-        if (ae.term < _currentTerm) {
-            std::cout << "[Node " << _id << "] Rejecting AppendEntries from Node " << ae.leaderId
+        std::cout << "[Node " << _id << "] Rejecting AppendEntries from Node " << ae.leaderId
                       << " due to stale term " << ae.term << " < " << _currentTerm << std::endl;
-            reply({_currentTerm, false});
-            return;
-        }
-
-        reply({_currentTerm,false});
+        reply({_currentTerm, false,ae.leaderId});
         return;
     }
 
@@ -153,7 +159,7 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
     }
     //持久化日志，待实现
 
-    reply({ _currentTerm, true });
+    reply({ _currentTerm, true ,ae.leaderId});
 }
 
 std::vector<LogEntry> RaftNode::getUncommittedEntries() const {
@@ -221,14 +227,21 @@ void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
 }
 
 //心跳包以及日志同步
+// 在 RaftNode.cpp 中改进 sendAppendEntriesTo
 void RaftNode::sendAppendEntriesTo(int toNodeId) {
-    int nextIdx = _nextIndex[toNodeId];//toNode节点接受的下一条日志
+    int nextIdx = _nextIndex[toNodeId];
     int prevLogIdx = nextIdx - 1;
     int prevLogTerm = (prevLogIdx >= 0 && prevLogIdx < _logs.size()) ? _logs[prevLogIdx].term : 0;
 
     std::vector<LogEntry> entries;
     if (nextIdx < _logs.size()) {
         entries.insert(entries.end(), _logs.begin() + nextIdx, _logs.end());
+    }
+
+    // 如果是心跳包(空日志)，确保prevLogIdx和prevLogTerm正确
+    if (entries.empty() && !_logs.empty()) {
+        prevLogIdx = _logs.size() - 1;
+        prevLogTerm = _logs.back().term;
     }
 
     AppendEntries ae{
@@ -243,8 +256,6 @@ void RaftNode::sendAppendEntriesTo(int toNodeId) {
     if (_sendAppendEntries) {
         _sendAppendEntries(toNodeId, ae);
     }
-    std::cout << "[Node " << _id << "] sendAppendEntriesTo(" << toNodeId << ") entries=" << ae.entries.size() << " term=" << ae.term << std::endl;
-
 }
 
 void RaftNode::appendNewCommand(int currentTerm,std::string& op,std::string& key,std::string &value) {

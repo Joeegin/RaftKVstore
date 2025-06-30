@@ -32,10 +32,10 @@ public:
 
     //Leader广播AppendEntries
     void appendEntries(const std::string& op,const std::string& key,const std::string& value);
-    void setAppendEntriesCallback(std::function<void(int,const AppendEntries&)> cb){ _appendEntriesCallback = cb;};
+    void setAppendEntriesCallback(std::function<void(int,const AppendEntries&)> cb){ _sendAppendEntries = cb;};
 
     void sendAppendEntriesTo(int toNodeId);
-    std::function<void(int toNodeId, const AppendEntries&)> _sendAppendEntries;
+    std::function<void(int toNodeId, const AppendEntries&)> _sendAppendEntries;//心跳包以及日志同步回调函数
     //待实现日志响应
     void receiveAppendResponse(int fromNodeId,int term,bool success);
 
@@ -62,6 +62,9 @@ private:
     int _electionTimeout;//选举的时间上限
     int _electionElapsed;//当前累计时间，如果超过选举时间上限并且没有收到Leader心跳，就触发一次选举
 
+    int _heartbeatElapsed = 0; // 心跳累计时间
+    int _heartbeatInterval = 100; // 心跳间隔(ms)
+
     RaftRole _role=RaftRole::FOLLOWER;
 
     std::function<void (int from,int to,int term)> _sendVoteRequest;//发送投票请求的回调函数
@@ -74,7 +77,7 @@ private:
 
     std::vector<LogEntry> _logs;
 
-    std::function<void(int,const AppendEntries&)> _appendEntriesCallback;
+
     std::string filename="kvstore"+std::to_string(_id)+".txt";
     KVStore _kvstore;
 };
