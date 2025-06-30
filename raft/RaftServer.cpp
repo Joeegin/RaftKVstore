@@ -164,6 +164,8 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
             }
         }
         if (message["type"] == "ClientGet") {
+            //消息体最好发送操作类型，方便日志保存，待实现
+
             std::string key = message["key"];
             if (_node->getRole()==RaftRole::LEADER) {
                 auto value = _node->getValue(key);
