@@ -30,3 +30,13 @@ add_executable(raft_client
 target_link_libraries(raft_client
         PRIVATE Boost::filesystem Boost::system
 )
+
+add_executable(test
+        test/test.cpp
+        ${COMMON_SOURCES}
+)
+
+target_link_libraries(
+        test
+        PRIVATE Boost::filesystem Boost::system
+)

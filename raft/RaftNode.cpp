@@ -172,11 +172,12 @@ void RaftNode::commitTo(int index, KVStore &store) {
     while (_lastCommitIndex < index && _lastCommitIndex + 1 < _logs.size()) {
         ++_lastCommitIndex;
         const auto& entry = _logs[_lastCommitIndex];
-        store.put(entry.key, entry.value);
-
-        std::cout<<"[commitTo]"<<entry.op<<entry.key<<entry.value<<std::endl;
+        if (entry.op == "Put") {
+            store.put(entry.key, entry.value);
+        }
+        // 以后可以扩展支持 Delete 等操作
+        std::cout<<"[commitTo] "<<entry.op<<" "<<entry.key<<" "<<entry.value<<std::endl;
     }
-
 }
 
 void RaftNode::appendEntries(const std::string& op,const std::string &key, const std::string &value) {
@@ -218,6 +219,7 @@ void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
 
             if (count>_totalNodes/2 && _logs[N].term== _currentTerm) {
                 _commitIndex = N;
+                commitTo(_commitIndex, _kvstore);
                 break;
             }
         }
