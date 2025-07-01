@@ -47,7 +47,8 @@ struct AppendResponse {
     int term;
     bool success;
     int from;
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(AppendResponse, term, success, from)
+    int matchIndex;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(AppendResponse, term, success, from,matchIndex)
 };
 
 struct ClientPut {

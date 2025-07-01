@@ -65,20 +65,38 @@ void RaftNode::becomeCandidate() {
 }
 
 void RaftNode::becomeLeader() {
-    _role=RaftRole::LEADER;
-    _leaderId=_id;//更新leaderid
+    _role = RaftRole::LEADER;
+    _leaderId = _id;
 
     _nextIndex = std::vector<int>(_totalNodes, _logs.size());
-    _matchIndex = std::vector<int>(_totalNodes, _logs.size()-1);
+    _matchIndex = std::vector<int>(_totalNodes, _logs.size() - 1);
 
-    commitTo(_commitIndex,_kvstore);
-    // 初始发送空的 AppendEntries 心跳
+    std::cout << "[Node " << _id << "] Becomes LEADER for term " << _currentTerm << std::endl;
+
+    // 尝试 commit 自己已有的日志
+    for (int N = _logs.size() - 1; N > _commitIndex; --N) {
+        int count = 1;
+        for (int i = 0; i < _totalNodes; ++i) {
+            if (i == _id) continue;
+            if (_matchIndex[i] >= N) {
+                ++count;
+            }
+        }
+
+        if (count > _totalNodes / 2 && _logs[N].term == _currentTerm) {
+            _commitIndex = N;
+            commitTo(_commitIndex, _kvstore);
+            break;
+        }
+    }
+
+    // 发送心跳
     for (int i = 0; i < _totalNodes; ++i) {
         if (i == _id) continue;
-        sendAppendEntriesTo(i);//发送心跳包
+        sendAppendEntriesTo(i);
     }
-    std::cout << "[Node " << _id << "] Becomes LEADER for term " << _currentTerm << std::endl;
 }
+
 
 void RaftNode::receiveVoteRequest(int term, int candidateId) {
     //收到选举者的拉票请求
@@ -147,10 +165,14 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
         }
     }
 
-
-    //追加新日志
+    //追加或覆盖新日志
     for (int i = 0; i < ae.entries.size(); ++i) {
-        _logs.push_back(ae.entries[i]);
+        int logIndex = ae.prevLogIndex + 1 + i;
+        if (logIndex < _logs.size()) {
+            _logs[logIndex] = ae.entries[i]; // 覆盖
+        } else {
+            _logs.push_back(ae.entries[i]); // 追加
+        }
     }
 
     //更新提交日志的索引
@@ -159,9 +181,10 @@ void RaftNode::receiveAppendEntries(const AppendEntries &ae, std::function<void(
         commitTo(newCommitIndex, _kvstore);
         _commitIndex = newCommitIndex;
     }
-    //持久化日志，待实现
 
-    reply({ _currentTerm, true ,ae.leaderId});
+    int matchIndex=ae.prevLogIndex+ae.entries.size();
+    //持久化日志，待实现
+    reply({ _currentTerm, true ,ae.leaderId,matchIndex});
 }
 
 std::vector<LogEntry> RaftNode::getUncommittedEntries() const {
@@ -204,29 +227,50 @@ void RaftNode::receiveAppendResponse(int fromNodeId, int term, bool success) {
     if (_role!=RaftRole::LEADER) {return;}
 
     if (success) {
-        _matchIndex[fromNodeId]=_nextIndex[fromNodeId]-1;
+        _matchIndex[fromNodeId]=_nextIndex[fromNodeId];
         _nextIndex[fromNodeId]=_nextIndex[fromNodeId]+1;
 
+        std::cout << "[Leader " << _id << "] _logs.size() = " << _logs.size()
+          << ", _commitIndex = " << _commitIndex
+          << ", _matchIndex = [ ";
         // 检查是否可以提交（多数节点已复制）
         for (int N=_logs.size()-1;N>_commitIndex;--N) {
             int count =1;
+            std::cout << "[Leader " << _id << "] matchIndex: ";
             for (int i=0;i<_totalNodes;++i) {
+                std::cout << _matchIndex[i] << " ";
+                std::cout << ", log.size = " << _logs.size() << ", commitIndex = " << _commitIndex << std::endl;
                 if (i==_id){ continue;}
                 if (_matchIndex[i]>=N) {
                     ++count;
                 }
             }
+            std::cout << "[Leader " << _id << "] Evaluating N=" << N
+                          << ", logTerm=" << _logs[N].term
+                          << ", currentTerm=" << _currentTerm
+                          << ", count=" << count << std::endl;
 
             if (count>_totalNodes/2 && _logs[N].term== _currentTerm) {
                 _commitIndex = N;
                 commitTo(_commitIndex, _kvstore);
+                std::cout << "[Leader " << _id << "] commitIndex advanced to " << N << std::endl;
+
                 break;
             }
         }
+        std::cout << "[Leader " << _id << "] receiveAppendResponse from " << fromNodeId
+          << ", success = " << success
+          << ", matchIndex = " << _matchIndex[fromNodeId]
+          << ", log size = " << _logs.size()
+          << ", current commitIndex = " << _commitIndex << std::endl;
+
 
     }else {
         _nextIndex[fromNodeId]=std::max(1, _nextIndex[fromNodeId] - 1);
     }
+    std::cout << "[Leader " << _id << "] received AppendResponse from Node " << fromNodeId
+          << ", success = " << success << ", nextIndex = " << _nextIndex[fromNodeId]
+          << ", matchIndex = " << _matchIndex[fromNodeId] << std::endl;
 
     // 无论成功与否，都重新尝试发送 AppendEntries
     sendAppendEntriesTo(fromNodeId);
@@ -257,6 +301,8 @@ void RaftNode::sendAppendEntriesTo(int toNodeId) {
         entries,
         _commitIndex
     };
+    std::cout << "[Leader " << _id << "] sending AppendEntries to Node " << toNodeId
+          << ", commitIndex = " << _commitIndex << ", entries = " << entries.size() << std::endl;
 
     if (_sendAppendEntries) {
         _sendAppendEntries(toNodeId, ae);

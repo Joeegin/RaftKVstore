@@ -120,7 +120,8 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
                     {"type", "AppendEntriesResponse"},
                     {"term", aresp.term},
                     {"success", aresp.success},
-                    {"from", aresp.from}
+                    {"from", aresp.from},
+                    {"matchIndex",aresp.matchIndex}
                 };
                 std::string response = respMsg.dump() + "\n";
                 boost::asio::async_write(*socket, boost::asio::buffer(response),
@@ -138,7 +139,7 @@ void RaftServer::handleMessage(const std::string &msg, std::shared_ptr<tcp::sock
 
             if (_node->getRole()==RaftRole::LEADER) {
                 std::string op="Put";
-                _node->appendNewCommand(_node->getCurrentTerm(),op,key,value);
+                _node->appendEntries(op,key,value);
                 json respMsg = {
                     {"type", "ClientResponse"},
                     {"success", true},
